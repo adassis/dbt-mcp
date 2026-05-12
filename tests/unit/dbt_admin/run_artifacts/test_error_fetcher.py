@@ -48,15 +48,26 @@ from dbt_mcp.errors import ArtifactRetrievalError, NotFoundError
             [
                 None,  # Source freshness artifact not available
                 {
+                    "metadata": {
+                        "dbt_schema_version": "https://schemas.getdbt.com/dbt/run-results/v5.json",
+                        "dbt_version": "1.7.0",
+                        "generated_at": "2024-01-01T10:00:00Z",
+                        "invocation_id": "test-invocation-id",
+                    },
                     "results": [
                         {
                             "unique_id": "model.test_model",
                             "status": "error",
                             "message": "Model compilation failed",
                             "relation_name": "analytics.test_model",
+                            "timing": [],
+                            "thread_id": "Thread-1",
+                            "execution_time": 1.0,
+                            "adapter_response": {},
                         }
                     ],
                     "args": {"target": "prod"},
+                    "elapsed_time": 1.0,
                 },
             ],
             2,
@@ -64,6 +75,53 @@ from dbt_mcp.errors import ArtifactRetrievalError, NotFoundError
                 "run_results.json not available - returning logs",
                 "Model compilation failed",
             ],
+        ),
+        # Source freshness "fail" status — not in strict sources schema, goes via LenientSources
+        # dbt-artifacts-parser rejects "fail" (not a valid Status1 enum value), so the lenient
+        # fallback is used. to_freshness_error must still catch it via RunResultsStatus.FAIL.
+        (
+            {
+                "id": 501,
+                "status": 20,
+                "is_cancelled": False,
+                "finished_at": "2024-01-01T12:00:00Z",
+                "run_steps": [
+                    {
+                        "index": 1,
+                        "name": "Source freshness",
+                        "status": 20,
+                        "finished_at": "2024-01-01T12:00:00Z",
+                    },
+                ],
+            },
+            [
+                {
+                    "metadata": {
+                        "dbt_schema_version": "https://schemas.getdbt.com/dbt/sources/v2.json"
+                    },
+                    "elapsed_time": 1.0,
+                    "results": [
+                        {
+                            "unique_id": "source.project.raw_data.orders",
+                            "status": "fail",
+                            "max_loaded_at": "2024-01-01T00:00:00Z",
+                            "snapshotted_at": "2024-01-01T12:00:00Z",
+                            "max_loaded_at_time_ago_in_s": 86400.0,
+                            "criteria": {
+                                "warn_after": None,
+                                "error_after": None,
+                                "filter": None,
+                            },
+                            "adapter_response": {},
+                            "timing": [],
+                            "thread_id": "Thread-1",
+                            "execution_time": 1.0,
+                        }
+                    ],
+                },
+            ],
+            1,
+            ["Source freshness error: 86400s since last load"],
         ),
         # Source freshness fails WITH sources.json available - should parse structured errors
         (
@@ -83,16 +141,28 @@ from dbt_mcp.errors import ArtifactRetrievalError, NotFoundError
             },
             [
                 {
+                    "metadata": {
+                        "dbt_schema_version": "https://schemas.getdbt.com/dbt/sources/v2.json"
+                    },
+                    "elapsed_time": 1.0,
                     "results": [
                         {
                             "unique_id": "source.project.raw_data.users",
-                            "status": "fail",  # sources.json uses "fail" not "error"
+                            "status": "error",
+                            "max_loaded_at": "2024-01-01T00:00:00Z",
+                            "snapshotted_at": "2024-01-01T11:00:00Z",
                             "max_loaded_at_time_ago_in_s": 172800.0,
+                            "criteria": {
+                                "warn_after": None,
+                                "error_after": None,
+                                "filter": None,
+                            },
+                            "adapter_response": {},
+                            "timing": [],
+                            "thread_id": "Thread-1",
+                            "execution_time": 1.0,
                         }
                     ],
-                    "metadata": {
-                        "dbt_schema_version": "https://schemas.getdbt.com/dbt/sources/v3.json"
-                    },
                 },
             ],
             1,
@@ -174,8 +244,10 @@ async def test_schema_validation_failure(mock_client, admin_config):
         ],
     }
 
-    # Return valid JSON but with missing required fields (schema mismatch)
-    # Expected schema: {"results": [...], "args": {...}, "metadata": {...}}
+    # Return valid JSON that is missing the "results" key.
+    # rr_artifact.parse() fails strict validation and falls back to LenientRunResults,
+    # which succeeds with results=[] (the default). Empty errors → "No failures found"
+    # message with truncated logs still attached.
     mock_client.get_job_run_artifact = AsyncMock(
         return_value='{"metadata": {"some": "value"}, "invalid_field": true}'
     )
@@ -189,11 +261,11 @@ async def test_schema_validation_failure(mock_client, admin_config):
 
     result = await error_fetcher.analyze_run_errors()
 
-    # Should fallback to logs when schema validation fails
+    # Lenient fallback parses successfully with no results → "No failures found" + logs
     assert len(result["failed_steps"]) == 1
     step = result["failed_steps"][0]
     assert step["step_name"] == "Invoke dbt with `dbt build`"
-    assert "run_results.json not available" in step["results"][0]["message"]
+    assert "No failures found in run_results.json" in step["results"][0]["message"]
     assert "Model compilation failed" in step["results"][0]["truncated_logs"]
 
 
