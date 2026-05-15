@@ -8,17 +8,9 @@ from dbt_mcp.mcp.server import create_dbt_mcp
 
 def main() -> None:
     config = load_config()
-
     server = asyncio.run(create_dbt_mcp(config))
-
     transport = validate_transport(os.environ.get("MCP_TRANSPORT", "stdio"))
-
-    if transport in ("sse", "streamable-http"):
-        host = os.environ.get("HOST", "0.0.0.0")
-        port = int(os.environ.get("PORT", 8000))
-        server.run(transport=transport, host=host, port=port)
-    else:
-        server.run(transport=transport)
+    server.run(transport=transport)
 
 
 if __name__ == "__main__":
