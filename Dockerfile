@@ -50,4 +50,4 @@ ENV MCP_TRANSPORT=streamable-http
 USER appuser
 
 # Démarrage du serveur MCP
-ENTRYPOINT ["dbt-mcp"]
+CMD ["sh", "-c", "FASTMCP_HOST=0.0.0.0 FASTMCP_PORT=8000 dbt-mcp"]
