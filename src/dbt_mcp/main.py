@@ -15,8 +15,8 @@ def main() -> None:
     # car FastMCP écoute sur 127.0.0.1 par défaut (inaccessible depuis l'extérieur)
     # On patche directement l'objet settings interne du serveur
     if transport in ("sse", "streamable-http"):
-        server._settings.host = "0.0.0.0"
-        server._settings.port = int(os.environ.get("PORT", 8000))
+        server.settings.host = "0.0.0.0"
+        server.settings.port = int(os.environ.get("PORT", 8000))
 
     server.run(transport=transport)
 
