@@ -1,56 +1,58 @@
-# Use a Python base image with uv pre-installed
+# ── Étape 1 : Build de l'application ──
+# Image Python 3.12 avec uv pré-installé (gestionnaire de packages rapide)
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS uv
 
-# Set the working directory in the container
+# Dossier de travail dans le conteneur
 WORKDIR /app
 
-# Enable bytecode compilation for better performance
+# Active la compilation bytecode Python (meilleures performances au démarrage)
 ENV UV_COMPILE_BYTECODE=1
 
-# Use copy mode for mounting cache to avoid linking issues
+# Mode "copy" pour uv (évite des erreurs de liens symboliques)
 ENV UV_LINK_MODE=copy
 
-# Install project dependencies using uv
-RUN --mount=type=cache,target=/root/.cache/uv \
+# Installe les dépendances (sans le projet lui-même, sans les dépendances de dev)
+# CORRECTION : ajout de "id=uv-cache" pour compatibilité Railway
+RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     uv sync --frozen --no-install-project --no-dev --no-editable
 
-# Copy the rest of the application code
+# Copie tout le code source dans le conteneur
 ADD . /app
 
-# Version for setuptools-scm (hatch-vcs) when .git is not available
-# This is set at build time by Docker's build system
+# Simule un numéro de version (nécessaire car le dossier .git n'existe pas dans le build)
 ARG SETUPTOOLS_SCM_PRETEND_VERSION=0.0.0
 ENV SETUPTOOLS_SCM_PRETEND_VERSION=${SETUPTOOLS_SCM_PRETEND_VERSION}
 
-# Install the application
-RUN --mount=type=cache,target=/root/.cache/uv \
+# Installe le projet lui-même
+# CORRECTION : ajout de "id=uv-cache" pour compatibilité Railway
+RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-editable
 
-# Create a minimal runtime image
+# ── Étape 2 : Image minimale de production ──
 FROM python:3.12-slim-bookworm
 
-# Set the working directory in the container
+# Dossier de travail
 WORKDIR /app
 
-# Create non-root user for security
+# Crée un utilisateur non-root pour la sécurité
 RUN useradd --create-home --shell /bin/bash appuser
 
-# Copy the installed dependencies and the virtual environment
+# Copie uniquement le .venv depuis l'étape de build (plus léger)
 COPY --from=uv --chown=appuser:appuser /app/.venv /app/.venv
 
-# Set the PATH to include the virtual environment
+# Ajoute le .venv au PATH
 ENV PATH="/app/.venv/bin:$PATH"
 
-# Configure logging to show output
+# Force l'affichage immédiat des logs (sans buffer)
 ENV PYTHONUNBUFFERED=1
 
-# Default to stdio transport for MCP
-ENV MCP_TRANSPORT=stdio
+# ⭐ Transport HTTP pour Railway + Dust (remplace le "stdio" par défaut)
+ENV MCP_TRANSPORT=streamable-http
 
-# Switch to non-root user
+# Passe en utilisateur non-root
 USER appuser
 
-# Set the default entrypoint
+# Commande de démarrage du serveur MCP
 ENTRYPOINT ["dbt-mcp"]
