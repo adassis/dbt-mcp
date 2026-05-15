@@ -11,12 +11,13 @@ def main() -> None:
     server = asyncio.run(create_dbt_mcp(config))
     transport = validate_transport(os.environ.get("MCP_TRANSPORT", "stdio"))
 
-    # Pour les transports HTTP (Railway), on force l'écoute sur 0.0.0.0
-    # car FastMCP écoute sur 127.0.0.1 par défaut (inaccessible depuis l'extérieur)
-    # On patche directement l'objet settings interne du serveur
     if transport in ("sse", "streamable-http"):
+        # Force l'écoute sur 0.0.0.0 (accessible depuis l'extérieur)
         server.settings.host = "0.0.0.0"
         server.settings.port = int(os.environ.get("PORT", 8000))
+        # Désactive la protection DNS rebinding (bloque les hostnames externes par défaut)
+        # Nécessaire pour que Railway et Dust puissent accéder au serveur
+        server.settings.transport_security = None
 
     server.run(transport=transport)
 
